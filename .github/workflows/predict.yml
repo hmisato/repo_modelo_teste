@@ -1,0 +1,49 @@
+name: predicao-modelo
+
+on:
+  push:
+    paths:
+      - 'dados/entrada/aplicacao/**'
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Pegar nome do arquivo de entrada
+        id: vars
+        run: |
+          FILE=$(git diff --name-only --diff-filter=AMR HEAD^ HEAD 2>/dev/null | grep '^dados/entrada/aplicacao/' | head -n 1)
+          if [ -z "$FILE" ]; then
+            FILE=$(ls -t dados/entrada/aplicacao/*.csv | head -n 1)
+          fi
+          FILE=$(basename "$FILE")
+          BASENAME="${FILE%.*}"
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "basename=$BASENAME" >> $GITHUB_OUTPUT
+
+      - name: Fazer 'pull' da imagem Docker
+        run: docker pull ${{ secrets.DOCKERHUB_USERNAME }}/modelo_teste:latest
+
+      - name: Executar as predições
+        run: |
+          INPUT=dados/entrada/aplicacao/${{ steps.vars.outputs.file }}
+          OUTPUT=dados/saida/${{ steps.vars.outputs.basename }}_predicao_automatica.csv
+          docker run --rm -v ${{ github.workspace }}:/data ${{ secrets.DOCKERHUB_USERNAME }}/modelo_teste:latest /data/$INPUT /data/$OUTPUT
+
+      - name: Fazer 'commit' e 'push' dos resultados
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add dados/saida/
+          git commit -m "Predição automática para ${{ steps.vars.outputs.file }}" || echo "Nada a commitar"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
